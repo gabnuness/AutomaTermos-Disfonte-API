@@ -34,7 +34,13 @@ def enviar_para_autentique(caminho_pdf, nome_funcionario, cpf_funcionario, telef
         $signers: [SignerInput!]!,
         $file: Upload!
     ) {
-        createDocument(sandbox: true, document: $document, signers: $signers, file: $file) {
+        createDocument(
+        sandbox: true, 
+        document: $document, 
+        signers: $signers, 
+        file: $file, 
+        folder_id: $folder_id
+        ) {
             id
             name
             signatures {
@@ -60,7 +66,8 @@ def enviar_para_autentique(caminho_pdf, nome_funcionario, cpf_funcionario, telef
                     {"x": "31.1", "y": "18.5", "z": 3, "element": "SIGNATURE"}
                 ]
             }
-        ]
+        ],
+        "folder_id": folder_id
     }
 
     # Monta o JSON corretamente, sem gambiarra de string
@@ -122,6 +129,31 @@ modelo = input("Modelo: ").upper()
 imei = input("IMEI: ")
 numero = input("Número: ")
 valor = float(input("Valor: "))
+
+# ==========================
+# ESCOLHA DO DEPARTAMENTO (pasta no Autentique)
+# =========================
+
+pastas_autentique = {
+    "1": {"nome": "Comercial", "folder_id": "COLOQUE_O_ID_AQUI"},
+    "2": {"nome": "Administrativo", "folder_id": "4da8da649f9bf29f06d51421e9e6f92487525e72"},
+    "3": {"nome": "Entrega", "folder_id": "b52cc860d3a3cc2db7545c9a631de160652ba580"},
+}
+
+print("\nEscolha o departamento de destino no Autentique:")
+print("1 - Comercial")
+print("2 - Administrativo")
+print("3 - Entrega")
+
+
+departamento = input("Opção: ").strip()
+while departamento not in pastas_autentique:
+    departamento = input("Opção inválida. Digite 1, 2 ou 3: ").strip()
+
+pasta_selecionada = pastas_autentique[departamento]
+print(f"Departamento selecionado: {pasta_selecionada['nome']}")
+
+
 
 # ==========================
 # FORMATAÇÃO DO VALOR
@@ -202,7 +234,7 @@ if caminho_docx:
         print(f"[OK] PDF gerado com sucesso em:\n{caminho_pdf}")
 
         
-        enviar_para_autentique(caminho_pdf, nome, cpf, numero)
+        enviar_para_autentique(caminho_pdf, nome, cpf, numero, pasta_selecionada["folder_id"])
         
         # Opcional: Se você NÃO quiser guardar o arquivo .docx e quiser APENAS o PDF,
         # descomente a linha abaixo para apagar o Word depois que o PDF for criado:
