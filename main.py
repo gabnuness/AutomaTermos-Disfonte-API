@@ -7,11 +7,49 @@ from docx2pdf import convert  # Nova biblioteca para conversão
 import requests
 import json
 
+# ==========================
+# FUNÇÃO PARA NORMALIZAR TELEFONE
+# ==========================
+def normalizar_telefone(numero_digitado, ddd_padrao="54"):
+    """
+    Aceita o número em qualquer formato e devolve ele padronizado.
+    - DDD é opcional (assume 54 se não vier)
+    - O 9 inicial é opcional (assume que existe se não vier)
+    Retorna: (numero_e164, numero_formatado)
+    Exemplo: "984481615" -> ("+5554984481615", "(54) 98448-1615")
+    """
+    apenas_digitos = "".join(filter(str.isdigit, numero_digitado))
+
+    # Remove o código do país se a pessoa digitou (ex: 55 54 98448-1615)
+    if apenas_digitos.startswith("55") and len(apenas_digitos) > 11:
+        apenas_digitos = apenas_digitos[2:]
+
+    if len(apenas_digitos) == 8:
+        # Só o número, sem DDD e sem o 9 (ex: 84481615)
+        apenas_digitos = ddd_padrao + "9" + apenas_digitos
+    elif len(apenas_digitos) == 9:
+        # Número com o 9, mas sem DDD (ex: 984481615)
+        apenas_digitos = ddd_padrao + apenas_digitos
+    elif len(apenas_digitos) == 10:
+        # DDD + número sem o 9 (ex: 5484481615)
+        apenas_digitos = apenas_digitos[:2] + "9" + apenas_digitos[2:]
+    elif len(apenas_digitos) == 11:
+        # Já está completo (DDD + 9 + número)
+        pass
+    else:
+        raise ValueError(f"Número de telefone inválido: '{numero_digitado}' (ficou com {len(apenas_digitos)} dígitos após limpeza)")
+
+    ddd = apenas_digitos[:2]
+    resto = apenas_digitos[2:]  # 9XXXXXXXX
+    numero_formatado = f"({ddd}) {resto[:5]}-{resto[5:]}"
+    numero_e164 = "+55" + apenas_digitos
+
+    return numero_e164, numero_formatado
 
 # ==========================
 # ENVIO PARA AUTENTIQUE
 # ==========================
-def enviar_para_autentique(caminho_pdf, nome_funcionario, cpf_funcionario, telefone_funcionario):
+def enviar_para_autentique(caminho_pdf, nome_funcionario, cpf_funcionario, telefone_funcionario, folder_id):
     """
     Envia o PDF do termo para o Autentique, já com telefone, CPF,
     validação por documento e posição de assinatura configurados.
@@ -26,13 +64,14 @@ def enviar_para_autentique(caminho_pdf, nome_funcionario, cpf_funcionario, telef
         exit()
 
     cpf_limpo = cpf_funcionario.replace(".", "").replace("-", "")
-    telefone_limpo = "+55" + telefone_funcionario.replace("(", "").replace(")", "").replace(" ", "").replace("-", "")
+    telefone_limpo, _ = normalizar_telefone(telefone_funcionario)
 
     query = """
     mutation CreateDocumentMutation(
         $document: DocumentInput!,
         $signers: [SignerInput!]!,
-        $file: Upload!
+        $file: Upload!,
+        $folder_id: UUID!
     ) {
         createDocument(
         sandbox: true, 
@@ -61,7 +100,7 @@ def enviar_para_autentique(caminho_pdf, nome_funcionario, cpf_funcionario, telef
                 "delivery_method": "DELIVERY_METHOD_WHATSAPP",
                 "action": "SIGN",
                 "configs": {"cpf": cpf_limpo},
-                "security_verifications": [{"type": "UPLOAD"}],
+                #"security_verifications": [{"type": "UPLOAD"}],
                 "positions": [
                     {"x": "31.1", "y": "18.5", "z": 3, "element": "SIGNATURE"}
                 ]
@@ -128,6 +167,14 @@ cpf = input("CPF: ")
 modelo = input("Modelo: ").upper()
 imei = input("IMEI: ")
 numero = input("Número: ")
+
+try:
+    telefone_e164, telefone_formatado = normalizar_telefone(numero)
+    print(f"Telefone confirmado: {telefone_formatado}")
+except ValueError as e:
+    print(f"\n[ERRO] {e}")
+    exit()
+
 valor = float(input("Valor: "))
 
 # ==========================
@@ -135,24 +182,64 @@ valor = float(input("Valor: "))
 # =========================
 
 pastas_autentique = {
-    "1": {"nome": "Comercial", "folder_id": "COLOQUE_O_ID_AQUI"},
-    "2": {"nome": "Administrativo", "folder_id": "4da8da649f9bf29f06d51421e9e6f92487525e72"},
-    "3": {"nome": "Entrega", "folder_id": "b52cc860d3a3cc2db7545c9a631de160652ba580"},
+    "1": {
+        "nome": "Administrativo",
+        "folder_id": "4da8da649f9bf29f06d51421e9e6f92487525e72",
+        "subpastas": None
+    },
+    "2": {
+        "nome": "Armazém",
+        "folder_id": "585c17bb4b6c7da4d0ce0783e69befc39c6bf163",
+        "subpastas": {
+            "1": {"nome": "Turno Dia", "folder_id": "c327d88bac0e4bc77cf3eb3308bbad37c8be343f"},
+            "2": {"nome": "Turno Noite", "folder_id": "a47d75a1222438f58d2888e6476e801ae14df769"},
+        }
+    },
+    "3": {
+        "nome": "Comercial",
+        "folder_id": "2f331f102b2a2d04d50937b744db9282c9061c52",
+        "subpastas": {
+            "1": {"nome": "Representante de Negócios", "folder_id": "d6c1bc409b754aa78cb34f70ab5897f850507a31"},
+            "2": {"nome": "Promotor de Vendas", "folder_id": "b81c765e693a968c8c1c8dd6b126b221abcc8fde"},
+        }
+    },
+    "4": {
+        "nome": "Entrega",
+        "folder_id": "b52cc860d3a3cc2db7545c9a631de160652ba580",
+        "subpastas": None
+    },
+    "5": {
+        "nome": "Puxada",
+        "folder_id": "86a14c460a74386b495c9b17d4fdc622701e6f7f",
+        "subpastas": None
+    },
 }
 
-print("\nEscolha o departamento de destino no Autentique:")
-print("1 - Comercial")
-print("2 - Administrativo")
-print("3 - Entrega")
 
+print("\nEscolha a pasta de destino no Autentique:")
+for chave, pasta in pastas_autentique.items():
+    print(f"{chave} - {pasta['nome']}")
 
-departamento = input("Opção: ").strip()
-while departamento not in pastas_autentique:
-    departamento = input("Opção inválida. Digite 1, 2 ou 3: ").strip()
+opcao_pasta = input("Opção: ").strip()
+while opcao_pasta not in pastas_autentique:
+    opcao_pasta = input("Opção inválida. Tente novamente: ").strip()
 
-pasta_selecionada = pastas_autentique[departamento]
-print(f"Departamento selecionado: {pasta_selecionada['nome']}")
+pasta_escolhida = pastas_autentique[opcao_pasta]
 
+if pasta_escolhida["subpastas"]:
+    print(f"\nEscolha a subpasta de {pasta_escolhida['nome']}:")
+    for chave, sub in pasta_escolhida["subpastas"].items():
+        print(f"{chave} - {sub['nome']}")
+
+    opcao_sub = input("Opção: ").strip()
+    while opcao_sub not in pasta_escolhida["subpastas"]:
+        opcao_sub = input("Opção inválida. Tente novamente: ").strip()
+
+    folder_id_final = pasta_escolhida["subpastas"][opcao_sub]["folder_id"]
+    print(f"Pasta selecionada: {pasta_escolhida['nome']} > {pasta_escolhida['subpastas'][opcao_sub]['nome']}")
+else:
+    folder_id_final = pasta_escolhida["folder_id"]
+    print(f"Pasta selecionada: {pasta_escolhida['nome']}")
 
 
 # ==========================
@@ -234,7 +321,7 @@ if caminho_docx:
         print(f"[OK] PDF gerado com sucesso em:\n{caminho_pdf}")
 
         
-        enviar_para_autentique(caminho_pdf, nome, cpf, numero, pasta_selecionada["folder_id"])
+        enviar_para_autentique(caminho_pdf, nome, cpf, numero, folder_id_final)
         
         # Opcional: Se você NÃO quiser guardar o arquivo .docx e quiser APENAS o PDF,
         # descomente a linha abaixo para apagar o Word depois que o PDF for criado:
