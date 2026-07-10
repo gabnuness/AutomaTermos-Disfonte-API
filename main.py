@@ -7,6 +7,20 @@ from docx2pdf import convert  # Nova biblioteca para conversão
 import requests
 import json
 
+
+# ==========================
+# FUNÇÃO PARA LIMPAR CPF
+# ==========================
+def limpar_cpf(cpf_bruto):
+    """Remove qualquer caractere que não seja número e valida o tamanho."""
+    apenas_digitos = "".join(filter(str.isdigit, cpf_bruto))
+    
+    if len(apenas_digitos) != 11:
+        raise ValueError(f"CPF inválido: '{cpf_bruto}' tem {len(apenas_digitos)} dígitos (deveria ter 11)")
+    
+    return apenas_digitos
+
+
 # ==========================
 # FUNÇÃO PARA NORMALIZAR TELEFONE
 # ==========================
@@ -63,7 +77,7 @@ def enviar_para_autentique(caminho_pdf, nome_funcionario, cpf_funcionario, telef
         print("Configure com: setx AUTENTIQUE_TOKEN \"seu_token\" e rabra o terminal.")
         exit()
 
-    cpf_limpo = cpf_funcionario.replace(".", "").replace("-", "")
+    cpf_limpo = limpar_cpf(cpf_funcionario)
     telefone_limpo, _ = normalizar_telefone(telefone_funcionario)
 
     query = """
@@ -100,7 +114,7 @@ def enviar_para_autentique(caminho_pdf, nome_funcionario, cpf_funcionario, telef
                 "delivery_method": "DELIVERY_METHOD_WHATSAPP",
                 "action": "SIGN",
                 "configs": {"cpf": cpf_limpo},
-                #"security_verifications": [{"type": "UPLOAD"}],
+                "security_verifications": [{"type": "UPLOAD"}],
                 "positions": [
                     {"x": "31.1", "y": "18.5", "z": 3, "element": "SIGNATURE"}
                 ]
