@@ -63,7 +63,7 @@ def normalizar_telefone(numero_digitado, ddd_padrao="54"):
 # ==========================
 # ENVIO PARA AUTENTIQUE
 # ==========================
-def enviar_para_autentique(caminho_pdf, nome_funcionario, cpf_funcionario, telefone_funcionario, folder_id):
+def enviar_para_autentique(caminho_pdf, nome_funcionario, cpf_funcionario, telefone_funcionario, folder_id, delivery_method):
     """
     Envia o PDF do termo para o Autentique, já com telefone, CPF,
     validação por documento e posição de assinatura configurados.
@@ -88,7 +88,7 @@ def enviar_para_autentique(caminho_pdf, nome_funcionario, cpf_funcionario, telef
         $folder_id: UUID!
     ) {
         createDocument(
-        sandbox: true, 
+        sandbox: false, 
         document: $document, 
         signers: $signers, 
         file: $file, 
@@ -110,11 +110,13 @@ def enviar_para_autentique(caminho_pdf, nome_funcionario, cpf_funcionario, telef
         "document": {"name": f"Termo_{nome_funcionario}"},
         "signers": [
             {
+                "name": nome_funcionario,
                 "phone": telefone_limpo,
-                "delivery_method": "DELIVERY_METHOD_WHATSAPP",
+                #"delivery_method": "DELIVERY_METHOD_WHATSAPP",
+                "delivery_method": delivery_method,
                 "action": "SIGN",
                 "configs": {"cpf": cpf_limpo},
-                "security_verifications": [{"type": "UPLOAD"}],
+                #"security_verifications": [{"type": "UPLOAD"}],
                 "positions": [
                     {"x": "31.1", "y": "18.5", "z": 3, "element": "SIGNATURE"}
                 ]
@@ -146,8 +148,23 @@ def enviar_para_autentique(caminho_pdf, nome_funcionario, cpf_funcionario, telef
         doc = resultado["data"]["createDocument"]
         print(f"ID do documento: {doc['id']}")
 
-    return resultado
+        # Se for modo LINK (setor Entrega), mostra o link pra você copiar e enviar manualmente
+        if delivery_method == "DELIVERY_METHOD_LINK":
+            link_encontrado = None
+            for assinatura in doc["signatures"]:
+                if assinatura.get("link") and assinatura["link"].get("short_link"):
+                    link_encontrado = assinatura["link"]["short_link"]
+                    break
 
+            if link_encontrado:
+                print("\n" + "="*60)
+                print("LINK DE ASSINATURA (envie manualmente ao motorista):")
+                print(link_encontrado)
+                print("="*60)
+            else:
+                print("\n[AVISO] Não encontrei o link de assinatura na resposta. Confira manualmente no painel.")
+
+    return resultado
 # ==========================
 # CONFIGURAÇÃO DO TKINTER (Janela oculta)
 # ==========================
@@ -256,6 +273,17 @@ else:
     print(f"Pasta selecionada: {pasta_escolhida['nome']}")
 
 
+# REGRA TEMPORÁRIA: Entrega não tem WhatsApp nos celulares ainda
+# Assim que o setor de Entrega tiver WhatsApp habilitado, REMOVER este bloco
+# e usar sempre "DELIVERY_METHOD_WHATSAPP"
+# ==========================
+if pasta_escolhida["nome"] == "Entrega":
+    delivery_method_final = "DELIVERY_METHOD_LINK"
+    print("\n[AVISO] Setor Entrega: o termo NÃO será enviado por WhatsApp.")
+    print("Um link de assinatura será gerado para você enviar manualmente ao motorista.")
+else:
+    delivery_method_final = "DELIVERY_METHOD_WHATSAPP"
+
 # ==========================
 # FORMATAÇÃO DO VALOR
 # ==========================
@@ -335,7 +363,7 @@ if caminho_docx:
         print(f"[OK] PDF gerado com sucesso em:\n{caminho_pdf}")
 
         
-        enviar_para_autentique(caminho_pdf, nome, cpf, numero, folder_id_final)
+        enviar_para_autentique(caminho_pdf, nome, cpf, numero, folder_id_final, delivery_method_final)
         
         # Opcional: Se você NÃO quiser guardar o arquivo .docx e quiser APENAS o PDF,
         # descomente a linha abaixo para apagar o Word depois que o PDF for criado:
