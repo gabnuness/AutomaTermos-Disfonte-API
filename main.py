@@ -88,7 +88,7 @@ def enviar_para_autentique(caminho_pdf, nome_funcionario, cpf_funcionario, telef
         $folder_id: UUID!
     ) {
         createDocument(
-        sandbox: false, 
+        sandbox: true, 
         document: $document, 
         signers: $signers, 
         file: $file, 
@@ -106,22 +106,30 @@ def enviar_para_autentique(caminho_pdf, nome_funcionario, cpf_funcionario, telef
     }
     """
 
+    signer = {
+        "name": nome_funcionario,
+        "action": "SIGN",
+        "configs": {"cpf": cpf_limpo},
+        #"security_verifications": [{"type": "UPLOAD"}],
+        "positions": [
+            {"x": "31.1", "y": "18.5", "z": 3, "element": "SIGNATURE"}
+        ]
+    }
+
+    # O campo "phone" só é enviado no modo WhatsApp.
+    # No modo Link, omitimos o telefone de propósito: se o signatário tiver um
+    # telefone associado, o Autentique passa a exigir um código de confirmação
+    # (por padrão via WhatsApp) antes de liberar a assinatura — o que trava o
+    # fluxo para quem não tem WhatsApp, como os motoristas da Entrega.
+    if delivery_method == "DELIVERY_METHOD_WHATSAPP":
+        signer["phone"] = telefone_limpo
+        signer["delivery_method"] = delivery_method
+    else:
+        signer["delivery_method"] = delivery_method
+
     variables = {
         "document": {"name": f"Termo_{nome_funcionario}"},
-        "signers": [
-            {
-                "name": nome_funcionario,
-                "phone": telefone_limpo,
-                #"delivery_method": "DELIVERY_METHOD_WHATSAPP",
-                "delivery_method": delivery_method,
-                "action": "SIGN",
-                "configs": {"cpf": cpf_limpo},
-                #"security_verifications": [{"type": "UPLOAD"}],
-                "positions": [
-                    {"x": "31.1", "y": "18.5", "z": 3, "element": "SIGNATURE"}
-                ]
-            }
-        ],
+        "signers": [signer],
         "folder_id": folder_id
     }
 
@@ -188,29 +196,40 @@ ano_atual = str(hoje.year)
 data_completa = f"{dia_atual} de {mes_atual} de {ano_atual}"
 
 # ==========================
-# DADOS (INPUT)
+# SISTEMA DE ETAPAS (permite digitar 'voltar' para corrigir um campo anterior)
 # ==========================
-nome = input("Nome: ").upper()
-cargo = input("Cargo: ").upper()
-setor = input("Área: ").upper()
-cidade = input("Cidade: ").upper()
-cpf = input("CPF: ")
-modelo = input("Modelo: ").upper()
-imei = input("IMEI: ")
-numero = input("Número: ")
+def pedir(pergunta, transform=None):
+    """
+    Pede um valor ao usuário. Se ele digitar 'voltar', retorna o texto especial
+    'VOLTAR' para o loop principal saber que deve retroceder uma etapa.
+    Se 'transform' levantar ValueError, a pergunta é repetida (sem voltar etapa).
+    """
+    while True:
+        valor = input(pergunta)
+        if valor.strip().lower() == "voltar":
+            return "VOLTAR"
+        if transform:
+            try:
+                return transform(valor)
+            except ValueError as e:
+                print(f"[ERRO] {e}")
+                continue
+        return valor
 
-try:
-    telefone_e164, telefone_formatado = normalizar_telefone(numero)
-    print(f"Telefone confirmado: {telefone_formatado}")
-except ValueError as e:
-    print(f"\n[ERRO] {e}")
-    exit()
 
-valor = float(input("Valor: "))
+def validar_cpf_input(v):
+    limpar_cpf(v)  # só valida o formato (11 dígitos); o valor salvo continua como digitado
+    return v
 
-# ==========================
-# ESCOLHA DO DEPARTAMENTO (pasta no Autentique)
-# =========================
+
+def validar_telefone_input(v):
+    _, formatado = normalizar_telefone(v)
+    return formatado
+
+
+def validar_valor_input(v):
+    return float(v.replace(",", "."))
+
 
 pastas_autentique = {
     "1": {
@@ -247,42 +266,139 @@ pastas_autentique = {
 }
 
 
-print("\nEscolha a pasta de destino no Autentique:")
-for chave, pasta in pastas_autentique.items():
-    print(f"{chave} - {pasta['nome']}")
+def validar_opcao_pasta(v):
+    if v not in pastas_autentique:
+        raise ValueError("Opção inválida. Escolha um número da lista.")
+    return v
 
-opcao_pasta = input("Opção: ").strip()
-while opcao_pasta not in pastas_autentique:
-    opcao_pasta = input("Opção inválida. Tente novamente: ").strip()
 
-pasta_escolhida = pastas_autentique[opcao_pasta]
+def deve_executar(etapa, dados):
+    """Algumas etapas só existem dependendo de respostas anteriores."""
+    if etapa == "subpasta":
+        pasta = pastas_autentique[dados["pasta"]]
+        return bool(pasta["subpastas"])
+    return True
+
+
+def executar_etapa(etapa, dados):
+    if etapa == "nome":
+        return pedir("Nome: ", lambda v: v.upper())
+    if etapa == "cargo":
+        return pedir("Cargo: ", lambda v: v.upper())
+    if etapa == "setor":
+        return pedir("Área: ", lambda v: v.upper())
+    if etapa == "cidade":
+        return pedir("Cidade: ", lambda v: v.upper())
+    if etapa == "cpf":
+        return pedir("CPF: ", validar_cpf_input)
+    if etapa == "modelo":
+        return pedir("Modelo: ", lambda v: v.upper())
+    if etapa == "imei":
+        return pedir("IMEI: ", lambda v: v)
+    if etapa == "numero":
+        return pedir("Número: ", validar_telefone_input)
+    if etapa == "valor":
+        return pedir("Valor: ", validar_valor_input)
+
+    if etapa == "pasta":
+        print("\nEscolha a pasta de destino no Autentique:")
+        for chave, pasta in pastas_autentique.items():
+            print(f"{chave} - {pasta['nome']}")
+        return pedir("Opção: ", validar_opcao_pasta)
+
+    if etapa == "subpasta":
+        pasta = pastas_autentique[dados["pasta"]]
+        print(f"\nEscolha a subpasta de {pasta['nome']}:")
+        for chave, sub in pasta["subpastas"].items():
+            print(f"{chave} - {sub['nome']}")
+        print("0 - Nenhuma (manter direto na pasta principal, sem subpasta)")
+
+        opcoes_validas = set(pasta["subpastas"].keys()) | {"0"}
+
+        def validar_sub(v):
+            if v not in opcoes_validas:
+                raise ValueError("Opção inválida.")
+            return v
+
+        return pedir("Opção: ", validar_sub)
+
+    if etapa == "envio":
+        pasta = pastas_autentique[dados["pasta"]]
+        sugestao = "2" if pasta["nome"] == "Entrega" else "1"
+        print("\nComo deseja enviar o termo para assinatura?")
+        print("1 - WhatsApp (automático)")
+        print("2 - Link manual (você envia por fora: SMS, ligação, etc.)")
+
+        def validar_envio(v):
+            if v == "":
+                return sugestao
+            if v not in ("1", "2"):
+                raise ValueError("Opção inválida. Digite 1 ou 2.")
+            return v
+
+        return pedir(f"Opção [Enter para usar sugestão: {sugestao}]: ", validar_envio)
+
+
+etapas = ["nome", "cargo", "setor", "cidade", "cpf", "modelo",
+          "imei", "numero", "valor", "pasta", "subpasta", "envio"]
+
+dados = {}
+print("(Em qualquer campo, digite 'voltar' para corrigir o anterior)\n")
+
+i = 0
+while i < len(etapas):
+    etapa = etapas[i]
+
+    if not deve_executar(etapa, dados):
+        i += 1
+        continue
+
+    resultado = executar_etapa(etapa, dados)
+
+    if resultado == "VOLTAR":
+        i -= 1
+        while i >= 0 and not deve_executar(etapas[i], dados):
+            i -= 1
+        if i < 0:
+            i = 0
+        continue
+
+    dados[etapa] = resultado
+    i += 1
+
+# ==========================
+# TRADUZINDO AS RESPOSTAS PARA AS VARIÁVEIS USADAS NO RESTO DO SCRIPT
+# ==========================
+nome = dados["nome"]
+cargo = dados["cargo"]
+setor = dados["setor"]
+cidade = dados["cidade"]
+cpf = dados["cpf"]
+modelo = dados["modelo"]
+imei = dados["imei"]
+numero = dados["numero"]
+valor = dados["valor"]
+
+pasta_escolhida = pastas_autentique[dados["pasta"]]
 
 if pasta_escolhida["subpastas"]:
-    print(f"\nEscolha a subpasta de {pasta_escolhida['nome']}:")
-    for chave, sub in pasta_escolhida["subpastas"].items():
-        print(f"{chave} - {sub['nome']}")
-
-    opcao_sub = input("Opção: ").strip()
-    while opcao_sub not in pasta_escolhida["subpastas"]:
-        opcao_sub = input("Opção inválida. Tente novamente: ").strip()
-
-    folder_id_final = pasta_escolhida["subpastas"][opcao_sub]["folder_id"]
-    print(f"Pasta selecionada: {pasta_escolhida['nome']} > {pasta_escolhida['subpastas'][opcao_sub]['nome']}")
+    opcao_sub = dados["subpasta"]
+    if opcao_sub == "0":
+        folder_id_final = pasta_escolhida["folder_id"]
+        print(f"\nPasta selecionada: {pasta_escolhida['nome']} (sem subpasta)")
+    else:
+        folder_id_final = pasta_escolhida["subpastas"][opcao_sub]["folder_id"]
+        print(f"\nPasta selecionada: {pasta_escolhida['nome']} > {pasta_escolhida['subpastas'][opcao_sub]['nome']}")
 else:
     folder_id_final = pasta_escolhida["folder_id"]
-    print(f"Pasta selecionada: {pasta_escolhida['nome']}")
+    print(f"\nPasta selecionada: {pasta_escolhida['nome']}")
 
-
-# REGRA TEMPORÁRIA: Entrega não tem WhatsApp nos celulares ainda
-# Assim que o setor de Entrega tiver WhatsApp habilitado, REMOVER este bloco
-# e usar sempre "DELIVERY_METHOD_WHATSAPP"
-# ==========================
-if pasta_escolhida["nome"] == "Entrega":
-    delivery_method_final = "DELIVERY_METHOD_LINK"
-    print("\n[AVISO] Setor Entrega: o termo NÃO será enviado por WhatsApp.")
-    print("Um link de assinatura será gerado para você enviar manualmente ao motorista.")
-else:
+if dados["envio"] == "1":
     delivery_method_final = "DELIVERY_METHOD_WHATSAPP"
+    print("Envio selecionado: WhatsApp")
+else:
+    delivery_method_final = "DELIVERY_METHOD_LINK"
+    print("Envio selecionado: Link manual")
 
 # ==========================
 # FORMATAÇÃO DO VALOR
