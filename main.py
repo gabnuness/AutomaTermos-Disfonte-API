@@ -24,15 +24,32 @@ def limpar_cpf(cpf_bruto):
 # ==========================
 # FUNÇÃO PARA NORMALIZAR TELEFONE
 # ==========================
-def normalizar_telefone(numero_digitado, ddd_padrao="54"):
+def normalizar_telefone(numero_digitado, ddd_padrao="54", permitir_vazio=False):
     """
     Aceita o número em qualquer formato e devolve ele padronizado.
     - DDD é opcional (assume 54 se não vier)
     - O 9 inicial é opcional (assume que existe se não vier)
+    - Se o valor vier vazio e permitir_vazio=True, retorna None e "S/N"
     Retorna: (numero_e164, numero_formatado)
     Exemplo: "984481615" -> ("+5554984481615", "(54) 98448-1615")
     """
-    apenas_digitos = "".join(filter(str.isdigit, numero_digitado))
+    if numero_digitado is None:
+        if permitir_vazio:
+            return None, "S/N"
+        raise ValueError("Número de telefone inválido: valor vazio")
+
+    texto = str(numero_digitado).strip()
+    if texto == "":
+        if permitir_vazio:
+            return None, "S/N"
+        raise ValueError("Número de telefone inválido: valor vazio")
+
+    if texto.upper() in {"S/N", "SN"}:
+        if permitir_vazio:
+            return None, "S/N"
+        return None, "S/N"
+
+    apenas_digitos = "".join(filter(str.isdigit, texto))
 
     # Remove o código do país se a pessoa digitou (ex: 55 54 98448-1615)
     if apenas_digitos.startswith("55") and len(apenas_digitos) > 11:
@@ -78,7 +95,7 @@ def enviar_para_autentique(caminho_pdf, nome_funcionario, cpf_funcionario, telef
         exit()
 
     cpf_limpo = limpar_cpf(cpf_funcionario)
-    telefone_limpo, _ = normalizar_telefone(telefone_funcionario)
+    telefone_limpo, _ = normalizar_telefone(telefone_funcionario, permitir_vazio=True)
 
     query = """
     mutation CreateDocumentMutation(
@@ -88,7 +105,7 @@ def enviar_para_autentique(caminho_pdf, nome_funcionario, cpf_funcionario, telef
         $folder_id: UUID!
     ) {
         createDocument(
-        sandbox: true, 
+        sandbox: false, 
         document: $document, 
         signers: $signers, 
         file: $file, 
@@ -121,7 +138,7 @@ def enviar_para_autentique(caminho_pdf, nome_funcionario, cpf_funcionario, telef
     # telefone associado, o Autentique passa a exigir um código de confirmação
     # (por padrão via WhatsApp) antes de liberar a assinatura — o que trava o
     # fluxo para quem não tem WhatsApp, como os motoristas da Entrega.
-    if delivery_method == "DELIVERY_METHOD_WHATSAPP":
+    if delivery_method == "DELIVERY_METHOD_WHATSAPP" and telefone_limpo:
         signer["phone"] = telefone_limpo
         signer["delivery_method"] = delivery_method
     else:
@@ -223,7 +240,17 @@ def validar_cpf_input(v):
 
 
 def validar_telefone_input(v):
-    _, formatado = normalizar_telefone(v)
+    if v is None:
+        return "S/N"
+
+    valor = str(v).strip()
+    if valor == "":
+        return "S/N"
+
+    if valor.upper() in {"S/N", "SN"}:
+        return "S/N"
+
+    _, formatado = normalizar_telefone(valor)
     return formatado
 
 
@@ -296,7 +323,7 @@ def executar_etapa(etapa, dados):
     if etapa == "imei":
         return pedir("IMEI: ", lambda v: v)
     if etapa == "numero":
-        return pedir("Número: ", validar_telefone_input)
+        return pedir("Número (deixe em branco para S/N): ", validar_telefone_input)
     if etapa == "valor":
         return pedir("Valor: ", validar_valor_input)
 
